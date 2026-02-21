@@ -8,6 +8,17 @@ local function escape_html(s)
   return s
 end
 
+-- Generate URL-friendly anchor id from heading text
+local function slugify(text)
+  text = text:gsub("<[^>]+>", "") -- strip HTML tags
+  text = text:lower()
+  text = text:gsub("[^%w%s%-]", "")
+  text = text:gsub("%s+", "-")
+  text = text:gsub("%-+", "-")
+  text = text:gsub("^%-+", ""):gsub("%-+$", "")
+  return text
+end
+
 local function apply_inline(s)
   -- Images before links
   s = s:gsub("!%[(.-)%]%((.-)%)", function(alt, src)
@@ -108,7 +119,19 @@ function M.render(markdown)
 
   local function flush_para()
     if #para_lines > 0 then
-      table.insert(html, "<p>" .. apply_inline(escape_html(table.concat(para_lines, " "))) .. "</p>")
+      local parts = {}
+      for j, pline in ipairs(para_lines) do
+        -- Hard line breaks: trailing two spaces or backslash
+        local has_break = pline:match("  $") or pline:match("\\$")
+        local clean = pline:gsub("  $", ""):gsub("\\$", "")
+        local escaped = apply_inline(escape_html(clean))
+        if has_break and j < #para_lines then
+          table.insert(parts, escaped .. "<br>")
+        else
+          table.insert(parts, escaped)
+        end
+      end
+      table.insert(html, "<p>" .. table.concat(parts, " ") .. "</p>")
       para_lines = {}
       in_para = false
     end
@@ -127,8 +150,26 @@ function M.render(markdown)
 
   local function flush_blockquote()
     if in_blockquote and #bq_lines > 0 then
-      local inner = M.render(table.concat(bq_lines, "\n"))
-      table.insert(html, "<blockquote>\n" .. inner .. "\n</blockquote>")
+      local first_line = bq_lines[1]
+      -- Azure DevOps style admonitions: > [!NOTE], > [!WARNING], etc.
+      local admonition_type = first_line:match("^%[!(%u+)%]%s*$")
+      if admonition_type then
+        local content_lines = {}
+        for j = 2, #bq_lines do
+          table.insert(content_lines, bq_lines[j])
+        end
+        local inner = M.render(table.concat(content_lines, "\n"))
+        local atype = admonition_type:lower()
+        -- Title-case: "NOTE" -> "Note"
+        local title = admonition_type:sub(1, 1):upper() .. admonition_type:sub(2):lower()
+        table.insert(html,
+          '<div class="admonition ' .. atype .. '">\n' ..
+          '<p class="admonition-title">' .. title .. '</p>\n' ..
+          inner .. '\n</div>')
+      else
+        local inner = M.render(table.concat(bq_lines, "\n"))
+        table.insert(html, "<blockquote>\n" .. inner .. "\n</blockquote>")
+      end
       bq_lines = {}
       in_blockquote = false
     end
@@ -141,9 +182,14 @@ function M.render(markdown)
     if line:match("^```") then
       if in_code_block then
         -- End code block
-        local escaped = escape_html(table.concat(code_lines, "\n"))
-        local lang_attr = code_lang ~= "" and (' class="language-' .. code_lang .. '"') or ""
-        table.insert(html, "<pre><code" .. lang_attr .. ">" .. escaped .. "</code></pre>")
+        if code_lang == "mermaid" then
+          -- Mermaid diagram: render as div for mermaid.js
+          table.insert(html, '<div class="mermaid">\n' .. table.concat(code_lines, "\n") .. '\n</div>')
+        else
+          local escaped = escape_html(table.concat(code_lines, "\n"))
+          local lang_attr = code_lang ~= "" and (' class="language-' .. code_lang .. '"') or ""
+          table.insert(html, "<pre><code" .. lang_attr .. ">" .. escaped .. "</code></pre>")
+        end
         code_lines = {}
         code_lang = ""
         in_code_block = false
@@ -185,7 +231,9 @@ function M.render(markdown)
       flush_para()
       flush_list()
       local level = #heading_level
-      table.insert(html, "<h" .. level .. ">" .. apply_inline(escape_html(heading_text)) .. "</h" .. level .. ">")
+      local rendered = apply_inline(escape_html(heading_text))
+      local slug = slugify(heading_text)
+      table.insert(html, '<h' .. level .. ' id="' .. slug .. '">' .. rendered .. '</h' .. level .. '>')
       i = i + 1
       goto continue
     end
@@ -223,7 +271,20 @@ function M.render(markdown)
         in_list = true
         list_ordered = false
       end
-      table.insert(html, "<li>" .. apply_inline(escape_html(ul_item)) .. "</li>")
+      -- Task list items: - [x] / - [X] (checked), - [ ] (unchecked)
+      local checked = ul_item:match("^%[[xX]%]%s*(.*)")
+      local unchecked = ul_item:match("^%[ %]%s*(.*)")
+      if checked then
+        table.insert(html,
+          '<li class="task-list-item"><input type="checkbox" checked disabled> ' ..
+          apply_inline(escape_html(checked)) .. '</li>')
+      elseif unchecked then
+        table.insert(html,
+          '<li class="task-list-item"><input type="checkbox" disabled> ' ..
+          apply_inline(escape_html(unchecked)) .. '</li>')
+      else
+        table.insert(html, "<li>" .. apply_inline(escape_html(ul_item)) .. "</li>")
+      end
       i = i + 1
       goto continue
     end
