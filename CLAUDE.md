@@ -1,256 +1,256 @@
 # CLAUDE.md — nvim-markview
 
-This file provides context for AI assistants working in this codebase.
+このファイルは、本コードベースで作業する AI アシスタント向けのコンテキストを提供します。
 
-## Project Overview
+## プロジェクト概要
 
-**nvim-markview** is a Neovim plugin that renders a live Markdown preview in the user's default web browser. It is implemented entirely in Lua with zero external runtime dependencies, using `vim.uv` (libuv) to run a lightweight HTTP server inside Neovim's event loop.
+**nvim-markview** は、ユーザーのデフォルトブラウザでリアルタイムの Markdown プレビューを表示する Neovim プラグインです。外部ランタイム依存なしに純粋な Lua で実装されており、Neovim のイベントループ内で `vim.uv`（libuv）を使って軽量な HTTP サーバーを動作させています。
 
-- **Language:** Lua (Neovim plugin)
-- **Runtime:** Neovim 0.10+ (requires `vim.uv`)
-- **Dependencies:** None (pure Lua + Neovim standard library)
-- **License:** MIT
+- **言語:** Lua（Neovim プラグイン）
+- **ランタイム:** Neovim 0.10+（`vim.uv` が必要）
+- **依存関係:** なし（純粋な Lua + Neovim 標準ライブラリ）
+- **ライセンス:** MIT
 
 ---
 
-## Repository Structure
+## リポジトリ構成
 
 ```
 nvim-markview/
 ├── plugin/
-│   └── markview.lua          # Plugin entry point — registers Neovim user commands
+│   └── markview.lua          # プラグインエントリポイント — Neovim ユーザーコマンドを登録
 ├── lua/
 │   └── markview/
-│       ├── init.lua          # Public API: setup(), open(), close(), toggle()
-│       ├── server.lua        # HTTP/SSE server (vim.uv TCP)
-│       ├── parser.lua        # Markdown-to-HTML renderer
-│       ├── template.lua      # Full HTML page builder (CSS + JS embedded)
-│       └── util.lua          # debounce() and find_free_port() utilities
+│       ├── init.lua          # 公開 API: setup(), open(), close(), toggle()
+│       ├── server.lua        # HTTP/SSE サーバー（vim.uv TCP）
+│       ├── parser.lua        # Markdown → HTML レンダラー
+│       ├── template.lua      # 完全な HTML ページビルダー（CSS + JS 埋め込み）
+│       └── util.lua          # debounce() と find_free_port() ユーティリティ
 ├── doc/
-│   └── markview.txt          # Neovim :help documentation
+│   └── markview.txt          # Neovim :help ドキュメント
 └── README.md
 ```
 
 ---
 
-## Architecture
+## アーキテクチャ
 
-### Data Flow
+### データフロー
 
 ```
-[Neovim buffer]
+[Neovim バッファ]
     |
     | TextChanged / TextChangedI autocmd
     v
-[util.debounce(200ms)]           -- prevents update storm while typing
+[util.debounce(200ms)]           -- タイピング中の過剰な更新を防ぐ
     |
-    | fn() called after debounce settles
+    | デバウンス完了後に fn() を呼び出し
     v
 [server.push(markdown)]
     |
-    | parser.render(markdown) -> HTML string
+    | parser.render(markdown) -> HTML 文字列
     v
-[SSE broadcast to all /events clients]
+[全 /events クライアントへ SSE ブロードキャスト]
     |
-    | "data: <escaped HTML>\n\n"
+    | "data: <エスケープ済み HTML>\n\n"
     v
-[Browser EventSource.onmessage]
+[ブラウザ EventSource.onmessage]
     |
-    | replaces #content innerHTML, restores scroll position
+    | #content の innerHTML を置換、スクロール位置を復元
     v
-[Live preview updated]
+[ライブプレビュー更新完了]
 ```
 
-### HTTP Server Endpoints
+### HTTP サーバーエンドポイント
 
-Both endpoints are served by the same `vim.uv` TCP server bound to `127.0.0.1:<port>`:
+`127.0.0.1:<port>` にバインドされた同一の `vim.uv` TCP サーバーが両エンドポイントを処理します。
 
-| Endpoint    | Method | Purpose                                              |
-|-------------|--------|------------------------------------------------------|
-| `/`         | GET    | Full HTML page (initial page load)                   |
-| `/events`   | GET    | SSE stream — pushes rendered HTML on every change    |
-| anything else | GET  | 404 Not Found                                        |
+| エンドポイント  | メソッド | 用途                                               |
+|----------------|----------|----------------------------------------------------|
+| `/`            | GET      | 完全な HTML ページ（初回ページロード）             |
+| `/events`      | GET      | SSE ストリーム — 変更時にレンダリング済み HTML を push |
+| その他         | GET      | 404 Not Found                                      |
 
-The server intentionally listens only on `127.0.0.1` (loopback), never on public interfaces.
+サーバーは意図的に `127.0.0.1`（ループバック）のみでリッスンし、パブリックインターフェイスには公開しません。
 
 ---
 
-## Module Responsibilities
+## モジュール責務
 
 ### `plugin/markview.lua`
-- Plugin guard (`vim.g.loaded_markview`) to prevent double-loading.
-- Registers three Neovim user commands: `:MarkviewOpen`, `:MarkviewClose`, `:MarkviewToggle`.
-- Does **not** call `setup()` — that is the user's responsibility.
+- プラグインのニ重読み込み防止ガード（`vim.g.loaded_markview`）。
+- 3 つの Neovim ユーザーコマンドを登録: `:MarkviewOpen`、`:MarkviewClose`、`:MarkviewToggle`。
+- `setup()` は**呼び出さない** — それはユーザーの責任。
 
 ### `lua/markview/init.lua`
-The core of the plugin. Manages per-buffer state and orchestrates all subsystems.
+プラグインのコア。バッファごとの状態を管理し、すべてのサブシステムを調整します。
 
-**Key internals:**
-- `state` table: `table<bufnr, { srv, port, augroup }>` — tracks active previews per buffer.
-- `config` table: merged from `default_config` and user-provided options via `vim.tbl_deep_extend`.
-- `detect_browser()`: inspects `vim.loop.os_uname().sysname` to pick `open` (macOS), `cmd /c start` (Windows), or `xdg-open` (Linux/WSL).
-- `M.open(bufnr)`: starts server, creates autocmds (`TextChanged`, `TextChangedI`, `BufDelete`), does initial push, and opens the browser after a 100ms delay.
-- `M.close(bufnr)`: calls `srv.stop()`, removes the augroup, clears state.
-- `M.setup(opts)`: merges config, optionally registers a `FileType markdown` autocmd for `auto_open`, and binds the toggle keymap.
+**主要な内部実装:**
+- `state` テーブル: `table<bufnr, { srv, port, augroup }>` — バッファごとのアクティブなプレビューを追跡。
+- `config` テーブル: `vim.tbl_deep_extend` で `default_config` とユーザー指定オプションをマージ。
+- `detect_browser()`: `vim.loop.os_uname().sysname` を参照し、`open`（macOS）、`cmd /c start`（Windows）、`xdg-open`（Linux/WSL）を選択。
+- `M.open(bufnr)`: サーバーを起動し、autocmd（`TextChanged`、`TextChangedI`、`BufDelete`）を作成し、初回プッシュを行い、100ms 遅延後にブラウザを開く。
+- `M.close(bufnr)`: `srv.stop()` を呼び出し、augroup を削除し、state をクリア。
+- `M.setup(opts)`: 設定をマージし、必要に応じて `auto_open` 用の `FileType markdown` autocmd を登録し、トグルキーマップをバインド。
 
 ### `lua/markview/server.lua`
-Implements the HTTP server using `vim.uv.new_tcp()`.
+`vim.uv.new_tcp()` を使った HTTP サーバーの実装。
 
-**Key internals:**
-- `clients` list: holds open SSE `uv_tcp` handles.
-- `current_html`: caches the last rendered HTML so new SSE clients receive it immediately on connect.
-- `make_http_response(status, headers, body)`: builds a raw HTTP/1.1 response string.
-- `parse_request_line(data)`: extracts method and path from the raw HTTP request bytes.
-- `push(markdown)`: renders markdown → HTML, escapes newlines as `\n`, writes `data: ...\n\n` to all live clients, prunes dead handles.
-- `stop()`: closes all SSE clients and the TCP server handle.
-- All Neovim API calls inside uv callbacks must be wrapped in `vim.schedule()`.
+**主要な内部実装:**
+- `clients` リスト: オープン中の SSE `uv_tcp` ハンドルを保持。
+- `current_html`: 最後にレンダリングされた HTML をキャッシュ。新しい SSE クライアントが接続した際に即座に送信するために使用。
+- `make_http_response(status, headers, body)`: 生の HTTP/1.1 レスポンス文字列を構築。
+- `parse_request_line(data)`: 生の HTTP リクエストバイトからメソッドとパスを抽出。
+- `push(markdown)`: markdown → HTML にレンダリングし、改行を `\n` としてエスケープし、全ライブクライアントに `data: ...\n\n` を書き込み、切断済みハンドルを除去。
+- `stop()`: 全 SSE クライアントと TCP サーバーハンドルを閉じる。
+- uv コールバック内の Neovim API 呼び出しはすべて `vim.schedule()` でラップすること。
 
 ### `lua/markview/parser.lua`
-A single-pass, state-machine Markdown renderer. Converts a markdown string to an HTML fragment (no `<html>` wrapper).
+シングルパスのステートマシン型 Markdown レンダラー。Markdown 文字列を HTML フラグメント（`<html>` ラッパーなし）に変換します。
 
-**Supported syntax:**
+**サポートする構文:**
 
-| Element          | Syntax                         |
-|------------------|--------------------------------|
-| Headings         | `# H1` through `###### H6` (ATX only) |
-| Bold             | `**text**` or `__text__`       |
-| Italic           | `*text*` or `_text_`           |
-| Strikethrough    | `~~text~~`                     |
-| Inline code      | `` `code` ``                   |
-| Links            | `[text](url)`                  |
-| Images           | `![alt](src)`                  |
-| Fenced code      | ` ```lang ` / ` ``` `          |
-| Unordered list   | `- item`, `* item`, `+ item`   |
-| Ordered list     | `1. item`, `2. item`, …        |
-| Blockquote       | `> text` (recursive, nested)   |
-| GFM table        | pipe-delimited with separator row |
-| Horizontal rule  | `---`, `***`, or `___`         |
-| Paragraph        | any non-matching line          |
+| 要素              | 構文                           |
+|-------------------|--------------------------------|
+| 見出し            | `# H1` 〜 `###### H6`（ATX のみ）|
+| 太字              | `**text**` または `__text__`   |
+| 斜体              | `*text*` または `_text_`       |
+| 取り消し線        | `~~text~~`                     |
+| インラインコード  | `` `code` ``                   |
+| リンク            | `[text](url)`                  |
+| 画像              | `![alt](src)`                  |
+| フェンスコードブロック | ` ```lang ` / ` ``` `     |
+| 順序なしリスト    | `- item`、`* item`、`+ item`   |
+| 順序付きリスト    | `1. item`、`2. item`、…        |
+| ブロッククォート  | `> text`（再帰的、ネスト対応） |
+| GFM テーブル      | セパレーター行付きパイプ区切り |
+| 水平線            | `---`、`***`、または `___`     |
+| 段落              | いずれにも一致しない行         |
 
-**Key internals:**
-- `escape_html(s)`: escapes `& < > "` — always applied to user content before inserting into HTML.
-- `apply_inline(s)`: applies all inline patterns. Images are processed before links to avoid conflict.
-- `flush_para()`, `flush_list()`, `flush_blockquote()`: state-transition helpers that emit pending HTML and reset state flags.
-- `parse_table(lines, i)`: lookahead parser; checks `lines[i+1]` for separator row pattern before committing.
-- `M.render(markdown)` calls itself recursively for blockquote inner content.
+**主要な内部実装:**
+- `escape_html(s)`: `& < > "` をエスケープ — HTML に挿入する前にユーザーコンテンツに常に適用。
+- `apply_inline(s)`: すべてのインラインパターンを適用。画像はリンクより先に処理し競合を回避。
+- `flush_para()`、`flush_list()`、`flush_blockquote()`: 保留中の HTML を出力し状態フラグをリセットする状態遷移ヘルパー。
+- `parse_table(lines, i)`: 先読みパーサー。コミット前に `lines[i+1]` のセパレーター行パターンを確認。
+- `M.render(markdown)` はブロッククォートの内部コンテンツに対して再帰的に自身を呼び出す。
 
-**Parser ordering (inline patterns applied in this order):**
-1. Images `![…](…)` — before links to avoid `[…](…)` matching the inner part
-2. Links `[…](…)`
-3. Bold `**…**` / `__…__`
-4. Italic `*…*` / `_…_`
-5. Inline code `` `…` ``
-6. Strikethrough `~~…~~`
+**パーサー順序（インラインパターンの適用順）:**
+1. 画像 `![…](…)` — リンクより先に処理（`[…](…)` が内部にマッチするのを防ぐため）
+2. リンク `[…](…)`
+3. 太字 `**…**` / `__…__`
+4. 斜体 `*…*` / `_…_`
+5. インラインコード `` `…` ``
+6. 取り消し線 `~~…~~`
 
 ### `lua/markview/template.lua`
-Builds the complete browser HTML page.
+ブラウザ用の完全な HTML ページを構築します。
 
-**Key internals:**
-- `CSS`: embedded multi-line string with GitHub-flavored styling, CSS custom properties for theming, and a `prefers-color-scheme: dark` media query.
-- `JS`: small `EventSource` client — connects to `/events`, updates `#content` innerHTML on each message, preserves `window.scrollY`, relies on browser's built-in SSE reconnect.
-- `M.full_page(body_html, config)`: assembles `<!DOCTYPE html>…</html>`. Injects `<meta name="color-scheme" content="light|dark">` when `config.theme` is not `"auto"`.
+**主要な内部実装:**
+- `CSS`: GitHub 風スタイリング、テーマ用 CSS カスタムプロパティ、`prefers-color-scheme: dark` メディアクエリを含む埋め込み複数行文字列。
+- `JS`: 小さな `EventSource` クライアント — `/events` に接続し、メッセージごとに `#content` の innerHTML を更新し、`window.scrollY` を保持し、ブラウザ組み込みの SSE 再接続に依存。
+- `M.full_page(body_html, config)`: `<!DOCTYPE html>…</html>` を組み立て。`config.theme` が `"auto"` でない場合に `<meta name="color-scheme" content="light|dark">` を挿入。
 
 ### `lua/markview/util.lua`
-- `M.debounce(fn, ms)`: wraps `fn` with a `vim.uv` timer. Each call resets the timer; `fn` fires after `ms` milliseconds of silence. Uses `vim.schedule_wrap` to safely call Neovim APIs from the timer callback.
-- `M.find_free_port(start_port)`: iterates from `start_port` to `start_port + 100`, attempting `tcp:bind()` inside a `pcall`. Returns the first port that binds successfully, or `nil`.
+- `M.debounce(fn, ms)`: `vim.uv` タイマーで `fn` をラップ。各呼び出しでタイマーをリセット。`ms` ミリ秒の無活動後に `fn` を発火。タイマーコールバックから Neovim API を安全に呼び出すために `vim.schedule_wrap` を使用。
+- `M.find_free_port(start_port)`: `start_port` から `start_port + 100` まで反復し、`pcall` 内で `tcp:bind()` を試みる。最初に正常にバインドできたポートを返し、見つからない場合は `nil` を返す。
 
 ---
 
-## Configuration Options
+## 設定オプション
 
-Defaults (in `init.lua`):
+デフォルト値（`init.lua` 内）:
 
 ```lua
 {
-  port        = 8765,           -- starting port; auto-increments up to +100 if busy
-  auto_open   = false,          -- auto-start preview on FileType=markdown
-  debounce_ms = 200,            -- milliseconds to debounce buffer change events
-  browser     = nil,            -- nil = OS default; string = explicit command
+  port        = 8765,           -- 開始ポート; 使用中の場合は最大 +100 まで自動インクリメント
+  auto_open   = false,          -- FileType=markdown 時にプレビューを自動開始
+  debounce_ms = 200,            -- バッファ変更イベントのデバウンス時間（ミリ秒）
+  browser     = nil,            -- nil = OS デフォルト; string = 明示的なコマンド
   theme       = "auto",         -- "auto" | "light" | "dark"
   keymaps     = {
-    toggle = "<leader>mp",      -- set to false/nil to disable
+    toggle = "<leader>mp",      -- false/nil に設定すると無効化
   },
 }
 ```
 
-Users call `require("markview").setup(opts)` to override. Config is a module-level table — `setup()` must be called before `open()`.
+ユーザーは `require("markview").setup(opts)` を呼び出して上書きします。Config はモジュールレベルのテーブルで、`setup()` は `open()` より前に呼び出す必要があります。
 
 ---
 
-## Development Conventions
+## 開発規約
 
-### Lua Style
-- No strict linter is configured. Follow the style of existing files: 2-space indentation, snake_case for locals and module functions.
-- Type annotations use the EmmyLua/LuaLS format (`---@param`, `---@return`, `---@type`) — maintain these on all public functions.
-- Module pattern: every file returns a single `local M = {}` table.
-- No external libraries. Stick to `vim.*` APIs and the Lua standard library.
+### Lua スタイル
+- 厳格なリンターは設定されていません。既存ファイルのスタイルに従ってください: 2 スペースインデント、ローカルとモジュール関数は snake_case。
+- 型アノテーションは EmmyLua/LuaLS 形式（`---@param`、`---@return`、`---@type`）を使用 — すべての公開関数で維持すること。
+- モジュールパターン: すべてのファイルは単一の `local M = {}` テーブルを返す。
+- 外部ライブラリは使用しない。`vim.*` API と Lua 標準ライブラリのみを使用。
 
-### Neovim API Usage
-- Use `vim.uv` (not `vim.loop`) for libuv bindings — `vim.loop` is a deprecated alias.
-- Any Neovim API call (`vim.api.*`, `vim.notify`, `vim.schedule`, etc.) invoked from inside a `vim.uv` callback **must** be wrapped in `vim.schedule(function() … end)`.
-- Buffer validity should be checked with `vim.api.nvim_buf_is_valid(bufnr)` before accessing buffer contents inside async callbacks.
+### Neovim API の使用
+- libuv バインディングには `vim.uv` を使用（`vim.loop` は非推奨エイリアス）。
+- `vim.uv` コールバック内での Neovim API 呼び出し（`vim.api.*`、`vim.notify`、`vim.schedule` など）は必ず `vim.schedule(function() … end)` でラップすること。
+- 非同期コールバック内でバッファコンテンツにアクセスする前に、`vim.api.nvim_buf_is_valid(bufnr)` でバッファの有効性を確認すること。
 
-### Error Handling
-- Use `pcall` around operations that may fail cleanly (e.g., port binding, augroup deletion).
-- Use `vim.notify("[markview] <message>", vim.log.levels.<LEVEL>)` for user-facing notifications. Keep the `[markview]` prefix.
+### エラーハンドリング
+- 正常に失敗しうる操作（ポートバインディング、augroup 削除など）には `pcall` を使用。
+- ユーザー向け通知には `vim.notify("[markview] <メッセージ>", vim.log.levels.<LEVEL>)` を使用。`[markview]` プレフィックスを維持すること。
 
-### Adding New Markdown Syntax
-1. Add parsing logic in `lua/markview/parser.lua` inside `M.render()`.
-2. Inline syntax: add a `gsub` in `apply_inline()`.
-3. Block syntax: add a new `if` branch in the main `while i <= #lines do` loop. Always call relevant `flush_*()` helpers before emitting HTML for a new block type.
-4. Respect parser ordering — blocks are checked in this priority: fenced code block → blockquote → heading → horizontal rule → GFM table → unordered list → ordered list → empty line → paragraph.
-5. Add CSS in `lua/markview/template.lua` if the new element needs styling.
+### 新しい Markdown 構文の追加
+1. `lua/markview/parser.lua` の `M.render()` 内にパースロジックを追加。
+2. インライン構文: `apply_inline()` に `gsub` を追加。
+3. ブロック構文: メインの `while i <= #lines do` ループに新しい `if` ブランチを追加。新しいブロックタイプの HTML を出力する前に、必ず関連する `flush_*()` ヘルパーを呼び出すこと。
+4. パーサー順序を遵守 — ブロックはこの優先順位でチェックされる: フェンスコードブロック → ブロッククォート → 見出し → 水平線 → GFM テーブル → 順序なしリスト → 順序付きリスト → 空行 → 段落。
+5. 新しい要素にスタイリングが必要な場合は `lua/markview/template.lua` に CSS を追加。
 
-### Adding New Configuration Options
-1. Add the default value to `default_config` in `lua/markview/init.lua`.
-2. Add a LuaLS annotation (`---@field`) if extending a typed table.
-3. Pass `config` through to wherever the option is consumed (it is already passed to `server.start` and `template.full_page`).
-4. Document the new option in `doc/markview.txt` and `README.md`.
+### 新しい設定オプションの追加
+1. `lua/markview/init.lua` の `default_config` にデフォルト値を追加。
+2. 型付きテーブルを拡張する場合は LuaLS アノテーション（`---@field`）を追加。
+3. オプションが消費される場所まで `config` を渡す（すでに `server.start` と `template.full_page` に渡されている）。
+4. `doc/markview.txt` と `README.md` に新しいオプションを記載。
 
-### Per-Buffer State
-The `state` table in `init.lua` is the single source of truth for active previews:
+### バッファごとの状態
+`init.lua` の `state` テーブルがアクティブなプレビューの唯一の信頼できる情報源:
 ```lua
-state[bufnr] = { srv = <server handle>, port = <number>, augroup = <string> }
+state[bufnr] = { srv = <サーバーハンドル>, port = <数値>, augroup = <文字列> }
 ```
-- Always check `state[bufnr]` before starting or stopping.
-- Always set `state[bufnr] = nil` on close.
-- The `BufDelete` autocmd calls `M.close()` automatically — no manual cleanup needed in most flows.
+- 開始・停止の前に必ず `state[bufnr]` を確認。
+- クローズ時に必ず `state[bufnr] = nil` を設定。
+- `BufDelete` autocmd が自動的に `M.close()` を呼び出す — ほとんどのフローでは手動クリーンアップは不要。
 
-### SSE Protocol Notes
-- SSE frames sent by the server: `data: <payload>\n\n` (two newlines to terminate the event).
-- Newlines inside the HTML payload are escaped to the literal string `\n` before sending, then unescaped by the JavaScript client with `.replace(/\\n/g, '\n')`.
-- The browser's `EventSource` handles reconnection automatically; the server does not need to implement keep-alive pings for basic use.
-
----
-
-## Testing
-
-There is no automated test suite. Manual testing steps:
-
-1. Open Neovim with a Markdown file.
-2. Call `:MarkviewOpen` — verify the browser opens and renders the content.
-3. Edit the buffer — verify the preview updates within ~200ms.
-4. Close the buffer or call `:MarkviewClose` — verify the server stops (port is freed).
-5. Test with `auto_open = true` to verify the `FileType` autocmd fires.
-6. Test port collision: start two previews for two different buffers — each should use a different port.
-7. Test theme options: `"light"`, `"dark"`, `"auto"` (check browser dev tools for `color-scheme` meta tag).
+### SSE プロトコルのメモ
+- サーバーが送信する SSE フレーム: `data: <ペイロード>\n\n`（イベントを終了する 2 つの改行）。
+- HTML ペイロード内の改行は送信前にリテラル文字列 `\n` にエスケープし、JavaScript クライアントが `.replace(/\\n/g, '\n')` でアンエスケープする。
+- ブラウザの `EventSource` が自動的に再接続を処理するため、基本的な使用ではサーバーにキープアライブ ping を実装する必要はない。
 
 ---
 
-## Common Pitfalls
+## テスト
 
-- **`vim.uv` vs `vim.loop`**: always use `vim.uv`; `vim.loop` is deprecated in Neovim 0.10+.
-- **Neovim API in uv callbacks**: forgetting `vim.schedule()` causes "attempt to call a nil value" or Neovim assertion errors.
-- **SSE newline escaping**: the HTML payload must have all `\n` replaced with the literal `\n` (two characters) before sending over SSE, or the browser will split the event at each newline.
-- **`parse_table` lookahead**: the table parser reads `lines[i+1]` — always guard with `lines[i+1]` existence check (already done) before extending.
-- **`apply_inline` ordering**: images must be processed before links, otherwise `![alt](src)` partially matches the `[text](url)` pattern.
-- **`find_free_port` side effect**: the function binds and immediately closes a TCP handle for each port tested — this is intentional but means the port check is not atomic. Race conditions are theoretically possible but negligible in practice for a local plugin.
+自動テストスイートはありません。手動テスト手順:
+
+1. Markdown ファイルで Neovim を開く。
+2. `:MarkviewOpen` を実行 — ブラウザが開いてコンテンツがレンダリングされることを確認。
+3. バッファを編集 — 約 200ms 以内にプレビューが更新されることを確認。
+4. バッファを閉じるか `:MarkviewClose` を実行 — サーバーが停止する（ポートが解放される）ことを確認。
+5. `auto_open = true` でテスト — `FileType` autocmd が発火することを確認。
+6. ポート衝突のテスト: 2 つの異なるバッファで 2 つのプレビューを開始 — それぞれが異なるポートを使用することを確認。
+7. テーマオプションのテスト: `"light"`、`"dark"`、`"auto"`（ブラウザ開発者ツールで `color-scheme` メタタグを確認）。
 
 ---
 
-## Branch / Git Workflow
+## よくある落とし穴
 
-- Main branch: `master`
-- Feature/fix branches follow the pattern: `claude/<description>-<id>`
-- Commit messages are plain English imperatives (e.g., `Add strikethrough support to parser`).
-- There is no CI pipeline — all validation is manual.
+- **`vim.uv` vs `vim.loop`**: 常に `vim.uv` を使用。`vim.loop` は Neovim 0.10+ で非推奨。
+- **uv コールバック内の Neovim API**: `vim.schedule()` を忘れると "attempt to call a nil value" や Neovim アサーションエラーが発生する。
+- **SSE 改行エスケープ**: HTML ペイロードの `\n` は SSE 送信前にリテラルの `\n`（2 文字）に置換する必要がある。そうしないとブラウザが各改行でイベントを分割する。
+- **`parse_table` 先読み**: テーブルパーサーは `lines[i+1]` を読む — 拡張する際は `lines[i+1]` の存在チェックを必ずガードすること（既に実装済み）。
+- **`apply_inline` の順序**: 画像はリンクより先に処理する必要がある。そうしないと `![alt](src)` が `[text](url)` パターンに部分マッチする。
+- **`find_free_port` の副作用**: この関数はテストする各ポートに対して TCP ハンドルをバインドし即座に閉じる — これは意図的だが、ポートチェックがアトミックでないことを意味する。ローカルプラグインの実用上、競合状態は理論上は起こりうるが無視できる。
+
+---
+
+## ブランチ / Git ワークフロー
+
+- メインブランチ: `master`
+- フィーチャー/フィックスブランチの命名パターン: `claude/<説明>-<id>`
+- コミットメッセージは英語の命令形（例: `Add strikethrough support to parser`）。
+- CI パイプラインなし — すべての検証は手動。
