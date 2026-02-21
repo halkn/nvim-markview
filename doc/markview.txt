@@ -1,0 +1,118 @@
+*markview.txt*	Real-time Markdown browser preview for Neovim
+
+==============================================================================
+CONTENTS                                                    *markview-contents*
+
+  1. Introduction .......................... |markview-introduction|
+  2. Requirements .......................... |markview-requirements|
+  3. Installation .......................... |markview-installation|
+  4. Setup ................................. |markview-setup|
+  5. Commands .............................. |markview-commands|
+  6. Configuration ......................... |markview-configuration|
+  7. License ............................... |markview-license|
+
+==============================================================================
+1. INTRODUCTION                                         *markview-introduction*
+
+nvim-markview is a Neovim plugin that provides real-time Markdown preview in
+your browser. It starts a lightweight HTTP server using `vim.uv` (libuv) and
+pushes updates via Server-Sent Events (SSE) whenever the buffer changes.
+
+No external runtimes (Node.js, pandoc, etc.) are required. Everything is
+implemented in pure Lua.
+
+==============================================================================
+2. REQUIREMENTS                                         *markview-requirements*
+
+- Neovim 0.10 or later
+- A web browser
+
+==============================================================================
+3. INSTALLATION                                         *markview-installation*
+
+Using lazy.nvim: >lua
+  {
+    "halkn/nvim-markview",
+    ft = "markdown",
+    opts = {},
+  }
+<
+
+Using packer.nvim: >lua
+  use {
+    "halkn/nvim-markview",
+    config = function()
+      require("markview").setup()
+    end,
+  }
+<
+
+==============================================================================
+4. SETUP                                                     *markview-setup*
+
+Call `setup()` with your options (or none for defaults): >lua
+  require("markview").setup({
+    port        = 8765,
+    auto_open   = false,
+    debounce_ms = 200,
+    browser     = nil,
+    theme       = "auto",
+    keymaps     = {
+      toggle = "<leader>mp",
+    },
+  })
+<
+
+==============================================================================
+5. COMMANDS                                               *markview-commands*
+
+*:MarkviewOpen*
+  Open the browser preview for the current buffer. Starts the HTTP server,
+  opens your default browser, and begins sending live updates.
+
+*:MarkviewClose*
+  Close the browser preview for the current buffer. Stops the HTTP server
+  and removes autocmds.
+
+*:MarkviewToggle*
+  Toggle the browser preview for the current buffer.
+
+==============================================================================
+6. CONFIGURATION                                     *markview-configuration*
+
+All options and their defaults:
+
+`port` (number, default: 8765)
+  The starting port number for the HTTP server. If the port is busy, the
+  plugin tries up to 100 consecutive ports.
+
+`auto_open` (boolean, default: false)
+  Automatically open the preview when a Markdown file is opened.
+
+`debounce_ms` (number, default: 200)
+  Delay in milliseconds between a buffer change and the SSE push. Reduces
+  unnecessary updates while typing.
+
+`browser` (string|nil, default: nil)
+  Browser command to use. When nil, the OS default is used:
+  - Linux: `xdg-open`
+  - macOS: `open`
+  - Windows: `cmd /c start`
+
+`theme` (string, default: "auto")
+  Color theme. One of:
+  - `"auto"` – follows the OS `prefers-color-scheme` setting
+  - `"light"` – always use the light theme
+  - `"dark"` – always use the dark theme
+
+`keymaps.toggle` (string, default: "<leader>mp")
+  Normal-mode keymap to toggle the preview. Set to `false` or `nil` to
+  disable.
+
+==============================================================================
+7. LICENSE                                               *markview-license*
+
+MIT License. See LICENSE file in the plugin directory.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
