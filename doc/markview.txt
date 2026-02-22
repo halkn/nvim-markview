@@ -26,6 +26,10 @@ The rendered output is styled to match Azure DevOps wiki / pull request
 rendering. Syntax highlighting (highlight.js) and Mermaid diagram rendering
 (mermaid.js) are loaded from CDN and require an internet connection.
 
+Images referenced with relative paths (e.g. `![alt](./imgs/foo.png)`) are
+served automatically from the Markdown file's directory via the `/images/`
+endpoint. Path traversal (`..`) is blocked for security.
+
 ==============================================================================
 2. REQUIREMENTS                                         *markview-requirements*
 
@@ -131,7 +135,7 @@ BASIC ~
   Strikethrough  ~~text~~
   Inline code    `code`
   Link           [text](url)
-  Image          ![alt](src)
+  Image          ![alt](src)  — relative paths served from file's directory
   Hard line break  Two trailing spaces at end of line
   Horizontal rule  ---
 

@@ -3,6 +3,25 @@ local template = require("markview.template")
 
 local M = {}
 
+local MIME_TYPES = {
+  png  = "image/png",
+  jpg  = "image/jpeg",
+  jpeg = "image/jpeg",
+  gif  = "image/gif",
+  svg  = "image/svg+xml",
+  webp = "image/webp",
+  ico  = "image/x-icon",
+  bmp  = "image/bmp",
+}
+
+local function get_mime_type(path)
+  local ext = path:match("%.([^%.]+)$")
+  if ext then
+    return MIME_TYPES[ext:lower()] or "application/octet-stream"
+  end
+  return "application/octet-stream"
+end
+
 local function make_http_response(status, headers, body)
   local lines = { "HTTP/1.1 " .. status }
   for k, v in pairs(headers) do
@@ -21,8 +40,9 @@ end
 ---@param bufnr number
 ---@param port number
 ---@param config table
+---@param base_dir string|nil  Directory of the Markdown file (for serving relative images)
 ---@return { push: fun(markdown: string), stop: fun() }
-function M.start(bufnr, port, config)
+function M.start(bufnr, port, config, base_dir)
   local clients = {} -- SSE client handles
   local current_html = ""
 
@@ -66,7 +86,7 @@ function M.start(bufnr, port, config)
         -- Serve the full page
         vim.schedule(function()
           local md = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-          local body_html = parser.render(md)
+          local body_html = parser.render(md, base_dir)
           current_html = body_html
           local page = template.full_page(body_html, config)
           local response = make_http_response("200 OK", {
@@ -118,6 +138,54 @@ function M.start(bufnr, port, config)
           end
         end)
 
+      elseif method == "GET" and path:match("^/images/") then
+        -- Serve a local image file relative to base_dir
+        local rel = path:match("^/images/(.+)$")
+        -- Decode percent-encoded characters (e.g. %20 -> space)
+        rel = rel and rel:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+        local served = false
+        if base_dir and rel and not rel:match("%.%.") then
+          local full_path = base_dir .. "/" .. rel
+          local fd = vim.uv.fs_open(full_path, "r", 438)
+          if fd then
+            local stat = vim.uv.fs_fstat(fd)
+            if stat then
+              local data = vim.uv.fs_read(fd, stat.size, 0)
+              vim.uv.fs_close(fd)
+              if data then
+                local mime = get_mime_type(rel)
+                local response = make_http_response("200 OK", {
+                  ["Content-Type"] = mime,
+                  ["Content-Length"] = tostring(#data),
+                  ["Connection"] = "close",
+                  ["Cache-Control"] = "no-cache",
+                }, data)
+                client:write(response, function()
+                  client:shutdown(function()
+                    client:close()
+                  end)
+                end)
+                served = true
+              end
+            else
+              vim.uv.fs_close(fd)
+            end
+          end
+        end
+        if not served then
+          local body = "Not Found"
+          local response = make_http_response("404 Not Found", {
+            ["Content-Type"] = "text/plain",
+            ["Content-Length"] = tostring(#body),
+            ["Connection"] = "close",
+          }, body)
+          client:write(response, function()
+            client:shutdown(function()
+              client:close()
+            end)
+          end)
+        end
+
       else
         -- 404
         local body = "Not Found"
@@ -136,7 +204,7 @@ function M.start(bufnr, port, config)
   end)
 
   local function push(markdown)
-    local body_html = parser.render(markdown)
+    local body_html = parser.render(markdown, base_dir)
     current_html = body_html
     local escaped = body_html:gsub("\n", "\\n")
     local payload = "data: " .. escaped .. "\n\n"

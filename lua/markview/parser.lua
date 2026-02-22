@@ -19,10 +19,15 @@ local function slugify(text)
   return text
 end
 
-local function apply_inline(s)
+local function apply_inline(s, base_dir)
   -- Images before links
   s = s:gsub("!%[(.-)%]%((.-)%)", function(alt, src)
-    return '<img src="' .. src .. '" alt="' .. escape_html(alt) .. '">'
+    local img_src = src
+    -- Convert relative paths to /images/ endpoint
+    if base_dir and not src:match("^https?://") and not src:match("^/") and not src:match("^data:") then
+      img_src = "/images/" .. src
+    end
+    return '<img src="' .. img_src .. '" alt="' .. escape_html(alt) .. '">'
   end)
   -- Links
   s = s:gsub("%[(.-)%]%((.-)%)", function(text, href)
@@ -44,7 +49,7 @@ local function apply_inline(s)
 end
 
 -- Parse a GFM table and return HTML string, or nil if not a table
-local function parse_table(lines, i)
+local function parse_table(lines, i, base_dir)
   local header_line = lines[i]
   local sep_line = lines[i + 1]
   if not sep_line then
@@ -81,7 +86,7 @@ local function parse_table(lines, i)
   local headers = parse_row(header_line)
   for j, cell in ipairs(headers) do
     local align = alignments[j] or "left"
-    table.insert(html, '<th align="' .. align .. '">' .. apply_inline(escape_html(cell)) .. "</th>")
+    table.insert(html, '<th align="' .. align .. '">' .. apply_inline(escape_html(cell), base_dir) .. "</th>")
   end
   table.insert(html, "</tr>\n</thead>\n<tbody>")
 
@@ -91,7 +96,7 @@ local function parse_table(lines, i)
     table.insert(html, "<tr>")
     for k, cell in ipairs(cells) do
       local align = alignments[k] or "left"
-      table.insert(html, '<td align="' .. align .. '">' .. apply_inline(escape_html(cell)) .. "</td>")
+      table.insert(html, '<td align="' .. align .. '">' .. apply_inline(escape_html(cell), base_dir) .. "</td>")
     end
     table.insert(html, "</tr>")
     j = j + 1
@@ -102,8 +107,9 @@ local function parse_table(lines, i)
 end
 
 ---@param markdown string
+---@param base_dir string|nil  Directory of the Markdown file (for resolving relative image paths)
 ---@return string
-function M.render(markdown)
+function M.render(markdown, base_dir)
   local lines = vim.split(markdown, "\n")
   local html = {}
   local i = 1
@@ -127,7 +133,7 @@ function M.render(markdown)
         -- Hard line breaks: trailing two spaces
         local has_break = pline:match("  $")
         local clean = pline:gsub("  $", "")
-        local escaped = apply_inline(escape_html(clean))
+        local escaped = apply_inline(escape_html(clean), base_dir)
         if has_break and j < #para_lines then
           table.insert(parts, escaped .. "<br>")
         else
@@ -161,7 +167,7 @@ function M.render(markdown)
         for j = 2, #bq_lines do
           table.insert(content_lines, bq_lines[j])
         end
-        local inner = M.render(table.concat(content_lines, "\n"))
+        local inner = M.render(table.concat(content_lines, "\n"), base_dir)
         local atype = admonition_type:lower()
         -- Title-case: "NOTE" -> "Note"
         local title = admonition_type:sub(1, 1):upper() .. admonition_type:sub(2):lower()
@@ -170,7 +176,7 @@ function M.render(markdown)
           '<p class="admonition-title">' .. title .. '</p>\n' ..
           inner .. '\n</div>')
       else
-        local inner = M.render(table.concat(bq_lines, "\n"))
+        local inner = M.render(table.concat(bq_lines, "\n"), base_dir)
         table.insert(html, "<blockquote>\n" .. inner .. "\n</blockquote>")
       end
       bq_lines = {}
@@ -272,7 +278,7 @@ function M.render(markdown)
       flush_para()
       flush_list()
       local level = #hashes
-      local rendered = apply_inline(escape_html(heading_text))
+      local rendered = apply_inline(escape_html(heading_text), base_dir)
       local slug = slugify(heading_text)
       table.insert(html, '<h' .. level .. ' id="' .. slug .. '">' .. rendered .. '</h' .. level .. '>')
       i = i + 1
@@ -292,7 +298,7 @@ function M.render(markdown)
     if line:match("^|") and lines[i + 1] and lines[i + 1]:match("^|?%s*:?%-") then
       flush_para()
       flush_list()
-      local table_html, new_i = parse_table(lines, i)
+      local table_html, new_i = parse_table(lines, i, base_dir)
       if table_html then
         table.insert(html, table_html)
         i = new_i + 1
@@ -318,13 +324,13 @@ function M.render(markdown)
       if checked then
         table.insert(html,
           '<li class="task-list-item"><input type="checkbox" checked disabled> ' ..
-          apply_inline(escape_html(checked)) .. '</li>')
+          apply_inline(escape_html(checked), base_dir) .. '</li>')
       elseif unchecked then
         table.insert(html,
           '<li class="task-list-item"><input type="checkbox" disabled> ' ..
-          apply_inline(escape_html(unchecked)) .. '</li>')
+          apply_inline(escape_html(unchecked), base_dir) .. '</li>')
       else
-        table.insert(html, "<li>" .. apply_inline(escape_html(ul_item)) .. "</li>")
+        table.insert(html, "<li>" .. apply_inline(escape_html(ul_item), base_dir) .. "</li>")
       end
       i = i + 1
       goto continue
@@ -342,7 +348,7 @@ function M.render(markdown)
         in_list = true
         list_ordered = true
       end
-      table.insert(html, "<li>" .. apply_inline(escape_html(ol_item)) .. "</li>")
+      table.insert(html, "<li>" .. apply_inline(escape_html(ol_item), base_dir) .. "</li>")
       i = i + 1
       goto continue
     end
