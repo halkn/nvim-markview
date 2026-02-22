@@ -63,7 +63,10 @@ function M.open(bufnr)
     return
   end
 
-  local srv = server.start(bufnr, port, config)
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  local base_dir = (filepath and filepath ~= "") and vim.fn.fnamemodify(filepath, ":h") or nil
+
+  local srv = server.start(bufnr, port, config, base_dir)
   local augroup = "markview_buf_" .. bufnr
 
   state[bufnr] = { srv = srv, port = port, augroup = augroup }

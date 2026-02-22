@@ -12,6 +12,7 @@ Real-time Markdown browser preview for Neovim — no Node.js or pandoc required.
 - Auto dark/light theme following OS `prefers-color-scheme`
 - Scroll position preserved on updates
 - Multiple buffer support
+- Local images with relative paths are served automatically from the Markdown file's directory
 
 ## Requirements
 
@@ -65,7 +66,7 @@ Default keymap: `<leader>mp` to toggle.
 | Strikethrough | `~~text~~` |
 | Inline code | `` `code` `` |
 | Link | `[text](url)` |
-| Image | `![alt](src)` |
+| Image | `![alt](src)` — relative paths served from the file's directory |
 | Hard line break | Two trailing spaces |
 | Horizontal rule | `---` |
 
@@ -115,9 +116,17 @@ require("markview").setup({
 ```
 
 `vim.uv.new_tcp()` runs a lightweight HTTP server inside Neovim's event loop.
-`GET /` serves the initial HTML page; `GET /events` maintains a persistent
-SSE connection. Every buffer change triggers a debounced push of re-rendered
-HTML to all connected browser tabs.
+
+| Endpoint | Description |
+|---|---|
+| `GET /` | Serves the initial full HTML page |
+| `GET /events` | Persistent SSE connection — pushes re-rendered HTML on every change |
+| `GET /images/<path>` | Serves a local image file relative to the Markdown file's directory |
+
+Every buffer change triggers a debounced push of re-rendered HTML to all
+connected browser tabs. Relative image paths in the Markdown (e.g.
+`![screenshot](./imgs/foo.png)`) are rewritten to `/images/imgs/foo.png` and
+served from disk. Path traversal (`..`) is blocked.
 
 ## License
 
