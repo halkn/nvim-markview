@@ -116,6 +116,9 @@ function M.render(markdown)
   local para_lines = {}
   local in_blockquote = false
   local bq_lines = {}
+  local in_container = false
+  local container_type = ""
+  local container_lines = {}
 
   local function flush_para()
     if #para_lines > 0 then
@@ -208,6 +211,44 @@ function M.render(markdown)
 
     if in_code_block then
       table.insert(code_lines, line)
+      i = i + 1
+      goto continue
+    end
+
+    -- Container block: ::: mermaid … :::  (Azure DevOps native syntax)
+    if line:match("^:::") then
+      if in_container then
+        -- Closing ::: marker
+        if line:match("^:::%s*$") then
+          if container_type == "mermaid" then
+            table.insert(html, '<div class="mermaid">\n' .. table.concat(container_lines, "\n") .. '\n</div>')
+          end
+          container_lines = {}
+          container_type = ""
+          in_container = false
+        else
+          -- Nested ::: line: treat as content
+          table.insert(container_lines, line)
+        end
+      else
+        -- Opening ::: <type>
+        local ctype = line:match("^:::%s*(.+)")
+        if ctype then
+          ctype = ctype:match("^%s*(.-)%s*$"):lower()
+          flush_para()
+          flush_list()
+          flush_blockquote()
+          in_container = true
+          container_type = ctype
+          container_lines = {}
+        end
+      end
+      i = i + 1
+      goto continue
+    end
+
+    if in_container then
+      table.insert(container_lines, line)
       i = i + 1
       goto continue
     end
@@ -330,6 +371,11 @@ function M.render(markdown)
   if in_code_block and #code_lines > 0 then
     local escaped = escape_html(table.concat(code_lines, "\n"))
     table.insert(html, "<pre><code>" .. escaped .. "</code></pre>")
+  end
+  if in_container and #container_lines > 0 then
+    if container_type == "mermaid" then
+      table.insert(html, '<div class="mermaid">\n' .. table.concat(container_lines, "\n") .. '\n</div>')
+    end
   end
 
   return table.concat(html, "\n")
