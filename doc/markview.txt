@@ -9,7 +9,8 @@ CONTENTS                                                    *markview-contents*
   4. Setup ................................. |markview-setup|
   5. Commands .............................. |markview-commands|
   6. Configuration ......................... |markview-configuration|
-  7. License ............................... |markview-license|
+  7. Supported Syntax ...................... |markview-syntax|
+  8. License ............................... |markview-license|
 
 ==============================================================================
 1. INTRODUCTION                                         *markview-introduction*
@@ -21,11 +22,16 @@ pushes updates via Server-Sent Events (SSE) whenever the buffer changes.
 No external runtimes (Node.js, pandoc, etc.) are required. Everything is
 implemented in pure Lua.
 
+The rendered output is styled to match Azure DevOps wiki / pull request
+rendering. Syntax highlighting (highlight.js) and Mermaid diagram rendering
+(mermaid.js) are loaded from CDN and require an internet connection.
+
 ==============================================================================
 2. REQUIREMENTS                                         *markview-requirements*
 
 - Neovim 0.10 or later
 - A web browser
+- Internet connection (optional, for syntax highlighting and Mermaid diagrams)
 
 ==============================================================================
 3. INSTALLATION                                         *markview-installation*
@@ -105,12 +111,65 @@ All options and their defaults:
   - `"light"` – always use the light theme
   - `"dark"` – always use the dark theme
 
+  This setting also controls which highlight.js stylesheet is loaded and the
+  Mermaid diagram theme.
+
 `keymaps.toggle` (string, default: "<leader>mp")
   Normal-mode keymap to toggle the preview. Set to `false` or `nil` to
   disable.
 
 ==============================================================================
-7. LICENSE                                               *markview-license*
+7. SUPPORTED SYNTAX                                        *markview-syntax*
+
+The parser targets Azure DevOps wiki / pull request Markdown syntax.
+
+BASIC ~
+
+  Headings       # H1 through ###### H6 (ATX style only)
+  Bold           **text** or __text__
+  Italic         *text* or _text_
+  Strikethrough  ~~text~~
+  Inline code    `code`
+  Link           [text](url)
+  Image          ![alt](src)
+  Hard line break  Two trailing spaces at end of line
+  Horizontal rule  ---
+
+BLOCKS ~
+
+  Fenced code block    ```lang ... ```
+  Unordered list       - item  or  * item
+  Ordered list         1. item
+  Task list            - [ ] unchecked  /  - [x] checked
+  Blockquote           > text  (recursive, nestable)
+  GFM table            Pipe-separated with alignment separator row
+
+AZURE DEVOPS EXTENSIONS ~
+
+  Admonitions: >
+    > [!NOTE]
+    > [!TIP]
+    > [!WARNING]
+    > [!IMPORTANT]
+    > [!CAUTION]
+<
+  Mermaid diagrams (Azure DevOps native syntax): >
+    ::: mermaid
+    sequenceDiagram
+      Alice->>Bob: Hello
+    :::
+<
+  Mermaid diagrams (fenced code block syntax): >
+    ```mermaid
+    graph LR
+      A --> B
+    ```
+<
+  Heading anchors: All ATX headings receive an `id` attribute derived from
+  the heading text, enabling in-page anchor links (e.g. `#my-heading`).
+
+==============================================================================
+8. LICENSE                                               *markview-license*
 
 MIT License. See LICENSE file in the plugin directory.
 
