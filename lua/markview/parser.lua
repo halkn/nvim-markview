@@ -267,11 +267,11 @@ function M.render(markdown)
     end
 
     -- ATX Headings
-    local heading_level, heading_text = line:match("^(#{1,6})%s+(.*)")
-    if heading_level then
+    local hashes, heading_text = line:match("^(#+)%s+(.*)")
+    if hashes and #hashes <= 6 then
       flush_para()
       flush_list()
-      local level = #heading_level
+      local level = #hashes
       local rendered = apply_inline(escape_html(heading_text))
       local slug = slugify(heading_text)
       table.insert(html, '<h' .. level .. ' id="' .. slug .. '">' .. rendered .. '</h' .. level .. '>')
