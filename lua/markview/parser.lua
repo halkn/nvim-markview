@@ -124,9 +124,9 @@ function M.render(markdown)
     if #para_lines > 0 then
       local parts = {}
       for j, pline in ipairs(para_lines) do
-        -- Hard line breaks: trailing two spaces or backslash
-        local has_break = pline:match("  $") or pline:match("\\$")
-        local clean = pline:gsub("  $", ""):gsub("\\$", "")
+        -- Hard line breaks: trailing two spaces
+        local has_break = pline:match("  $")
+        local clean = pline:gsub("  $", "")
         local escaped = apply_inline(escape_html(clean))
         if has_break and j < #para_lines then
           table.insert(parts, escaped .. "<br>")
