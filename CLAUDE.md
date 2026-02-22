@@ -106,33 +106,53 @@ nvim-markview/
 - uv コールバック内の Neovim API 呼び出しはすべて `vim.schedule()` でラップすること。
 
 ### `lua/markview/parser.lua`
-シングルパスのステートマシン型 Markdown レンダラー。Markdown 文字列を HTML フラグメント（`<html>` ラッパーなし）に変換します。
+シングルパスのステートマシン型 Markdown レンダラー。Markdown 文字列を HTML フラグメント（`<html>` ラッパーなし）に変換します。Azure DevOps wiki / pull request の Markdown 仕様に準拠しています。
 
 **サポートする構文:**
 
-| 要素              | 構文                           |
-|-------------------|--------------------------------|
-| 見出し            | `# H1` 〜 `###### H6`（ATX のみ）|
-| 太字              | `**text**` または `__text__`   |
-| 斜体              | `*text*` または `_text_`       |
-| 取り消し線        | `~~text~~`                     |
-| インラインコード  | `` `code` ``                   |
-| リンク            | `[text](url)`                  |
-| 画像              | `![alt](src)`                  |
-| フェンスコードブロック | ` ```lang ` / ` ``` `     |
-| 順序なしリスト    | `- item`、`* item`、`+ item`   |
-| 順序付きリスト    | `1. item`、`2. item`、…        |
-| ブロッククォート  | `> text`（再帰的、ネスト対応） |
-| GFM テーブル      | セパレーター行付きパイプ区切り |
-| 水平線            | `---`、`***`、または `___`     |
-| 段落              | いずれにも一致しない行         |
+| 要素              | 構文                                                      |
+|-------------------|-----------------------------------------------------------|
+| 見出し            | `# H1` 〜 `###### H6`（ATX のみ）                        |
+| 太字              | `**text**` または `__text__`                              |
+| 斜体              | `*text*` または `_text_`                                  |
+| 取り消し線        | `~~text~~`                                                |
+| インラインコード  | `` `code` ``                                              |
+| リンク            | `[text](url)`                                             |
+| 画像              | `![alt](src)`                                             |
+| ハード改行        | 行末スペース2つ                                           |
+| フェンスコードブロック | ` ```lang ` / ` ``` `                                |
+| 順序なしリスト    | `- item`、`* item`                                        |
+| 順序付きリスト    | `1. item`、`2. item`、…                                   |
+| タスクリスト      | `- [ ] todo`、`- [x] done`（`[X]` も可）                 |
+| ブロッククォート  | `> text`（再帰的、ネスト対応）                            |
+| アドモニション    | `> [!NOTE]` / `> [!TIP]` / `> [!WARNING]` / `> [!IMPORTANT]` / `> [!CAUTION]` |
+| GFM テーブル      | セパレーター行付きパイプ区切り                            |
+| 水平線            | `---`、`***`、または `___`                                |
+| Mermaid（コロン） | `::: mermaid` … `:::`（Azure DevOps ネイティブ構文）      |
+| Mermaid（バッククォート） | ` ```mermaid ` … ` ``` `                        |
+| 段落              | いずれにも一致しない行                                    |
 
 **主要な内部実装:**
 - `escape_html(s)`: `& < > "` をエスケープ — HTML に挿入する前にユーザーコンテンツに常に適用。
+- `slugify(text)`: 見出しテキストから URL 安全なアンカー ID を生成（小文字化・非英数字除去・スペースをハイフンに変換）。
 - `apply_inline(s)`: すべてのインラインパターンを適用。画像はリンクより先に処理し競合を回避。
-- `flush_para()`、`flush_list()`、`flush_blockquote()`: 保留中の HTML を出力し状態フラグをリセットする状態遷移ヘルパー。
+- `flush_para()`: 保留中の段落を出力。行末スペース2つを `<br>` に変換してからフラッシュ。
+- `flush_list()`、`flush_blockquote()`: 保留中の HTML を出力し状態フラグをリセットする状態遷移ヘルパー。
+- `flush_blockquote()`: 最初の行が `[!TYPE]` の場合はアドモニションとして、それ以外は通常のブロッククォートとして出力。
 - `parse_table(lines, i)`: 先読みパーサー。コミット前に `lines[i+1]` のセパレーター行パターンを確認。
-- `M.render(markdown)` はブロッククォートの内部コンテンツに対して再帰的に自身を呼び出す。
+- `M.render(markdown)` はブロッククォートとアドモニションの内部コンテンツに対して再帰的に自身を呼び出す。
+
+**パーサー順序（ブロック要素のチェック優先順）:**
+1. フェンスコードブロック（` ``` `）
+2. コンテナブロック（`:::`）— Mermaid 等
+3. ブロッククォート（`>`）— アドモニション判定を含む
+4. ATX 見出し（`#`）
+5. 水平線（`---` 等）
+6. GFM テーブル（`|`）
+7. 順序なしリスト（`-`、`*`）— タスクリスト判定を含む
+8. 順序付きリスト（`1.`）
+9. 空行
+10. 段落
 
 **パーサー順序（インラインパターンの適用順）:**
 1. 画像 `![…](…)` — リンクより先に処理（`[…](…)` が内部にマッチするのを防ぐため）
@@ -146,9 +166,15 @@ nvim-markview/
 ブラウザ用の完全な HTML ページを構築します。
 
 **主要な内部実装:**
-- `CSS`: GitHub 風スタイリング、テーマ用 CSS カスタムプロパティ、`prefers-color-scheme: dark` メディアクエリを含む埋め込み複数行文字列。
-- `JS`: 小さな `EventSource` クライアント — `/events` に接続し、メッセージごとに `#content` の innerHTML を更新し、`window.scrollY` を保持し、ブラウザ組み込みの SSE 再接続に依存。
-- `M.full_page(body_html, config)`: `<!DOCTYPE html>…</html>` を組み立て。`config.theme` が `"auto"` でない場合に `<meta name="color-scheme" content="light|dark">` を挿入。
+- `CSS`: Azure DevOps カラーパレット（フォント: Segoe UI、アクセント: `#0078d4`）、テーマ用 CSS カスタムプロパティ、`prefers-color-scheme: dark` メディアクエリ、アドモニション・タスクリスト・Mermaid のスタイリングを含む埋め込み複数行文字列。
+- `hljs_css(theme)`: `config.theme` に基づいて highlight.js のスタイルシート `<link>` タグを生成。`"auto"` の場合はメディアクエリで light/dark を切り替え。
+- `build_js(theme)`: `EventSource` クライアントと highlight.js・mermaid.js の初期化コードを生成。SSE 更新のたびに `hljs.highlightElement()` と `mermaid.run()` を呼び出す。`config.theme` に応じて Mermaid のテーマ（`"default"` / `"dark"`）を設定。
+- `M.full_page(body_html, config)`: `<!DOCTYPE html>…</html>` を組み立て。highlight.js（CDN）・mermaid.js（CDN）の `<script>` / `<link>` タグを含む。`config.theme` が `"auto"` でない場合に `<meta name="color-scheme" content="light|dark">` を挿入。
+
+**CDN 依存:**
+- highlight.js 11.9.0: `cdnjs.cloudflare.com` — コードブロックのシンタックスハイライト
+- mermaid.js v11: `cdn.jsdelivr.net` — Mermaid ダイアグラムのレンダリング
+- オフライン環境ではこれらの機能は動作しないが、コンテンツ自体は表示される。
 
 ### `lua/markview/util.lua`
 - `M.debounce(fn, ms)`: `vim.uv` タイマーで `fn` をラップ。各呼び出しでタイマーをリセット。`ms` ミリ秒の無活動後に `fn` を発火。タイマーコールバックから Neovim API を安全に呼び出すために `vim.schedule_wrap` を使用。
@@ -198,7 +224,7 @@ nvim-markview/
 1. `lua/markview/parser.lua` の `M.render()` 内にパースロジックを追加。
 2. インライン構文: `apply_inline()` に `gsub` を追加。
 3. ブロック構文: メインの `while i <= #lines do` ループに新しい `if` ブランチを追加。新しいブロックタイプの HTML を出力する前に、必ず関連する `flush_*()` ヘルパーを呼び出すこと。
-4. パーサー順序を遵守 — ブロックはこの優先順位でチェックされる: フェンスコードブロック → ブロッククォート → 見出し → 水平線 → GFM テーブル → 順序なしリスト → 順序付きリスト → 空行 → 段落。
+4. パーサー順序を遵守 — ブロックはこの優先順位でチェックされる: フェンスコードブロック → コンテナブロック（:::）→ ブロッククォート → 見出し → 水平線 → GFM テーブル → 順序なしリスト → 順序付きリスト → 空行 → 段落。
 5. 新しい要素にスタイリングが必要な場合は `lua/markview/template.lua` に CSS を追加。
 
 ### 新しい設定オプションの追加
@@ -245,6 +271,10 @@ state[bufnr] = { srv = <サーバーハンドル>, port = <数値>, augroup = <�
 - **`parse_table` 先読み**: テーブルパーサーは `lines[i+1]` を読む — 拡張する際は `lines[i+1]` の存在チェックを必ずガードすること（既に実装済み）。
 - **`apply_inline` の順序**: 画像はリンクより先に処理する必要がある。そうしないと `![alt](src)` が `[text](url)` パターンに部分マッチする。
 - **`find_free_port` の副作用**: この関数はテストする各ポートに対して TCP ハンドルをバインドし即座に閉じる — これは意図的だが、ポートチェックがアトミックでないことを意味する。ローカルプラグインの実用上、競合状態は理論上は起こりうるが無視できる。
+- **コンテナブロック（`:::`）とコードブロック（` ``` `）の優先順位**: コンテナブロックのチェックはコードブロックの `in_code_block` ガードの後に置くこと。コードブロック内の `:::` 行はそのままコード行として扱われる。
+- **Mermaid の再レンダリング**: SSE 更新後に `#content` の innerHTML を置換すると、新しい `.mermaid` 要素は `data-processed` 属性を持たない。`mermaid.run()` を呼び出すだけで再レンダリングできる。
+- **CDN オフライン時**: highlight.js / mermaid.js の CDN が利用できない場合でも、コードブロックやダイアグラムのソーステキスト自体は表示される（ハイライト・描画なし）。エラーにはならない。
+- **Azure DevOps 非対応構文**: `\` による強制改行は Azure DevOps 非対応のため実装しない。行末スペース2つのみをサポートする。
 
 ---
 

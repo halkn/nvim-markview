@@ -6,7 +6,9 @@ Real-time Markdown browser preview for Neovim — no Node.js or pandoc required.
 
 - Live preview in your default browser via Server-Sent Events (SSE)
 - Pure Lua implementation using `vim.uv` (libuv) — zero external dependencies
-- GitHub-flavored Markdown: headings, fenced code, tables, lists, blockquotes, and more
+- Azure DevOps-compatible Markdown rendering (wiki / pull request syntax)
+- Syntax highlighting via highlight.js (CDN, internet required)
+- Mermaid diagram rendering via mermaid.js (CDN, internet required)
 - Auto dark/light theme following OS `prefers-color-scheme`
 - Scroll position preserved on updates
 - Multiple buffer support
@@ -50,6 +52,40 @@ Open a Markdown file, then:
 | `:MarkviewToggle`  | Toggle the preview                   |
 
 Default keymap: `<leader>mp` to toggle.
+
+## Supported Syntax
+
+### Basic
+
+| Element | Syntax |
+|---|---|
+| Headings | `# H1` — `###### H6` (ATX only) |
+| Bold | `**text**` or `__text__` |
+| Italic | `*text*` or `_text_` |
+| Strikethrough | `~~text~~` |
+| Inline code | `` `code` `` |
+| Link | `[text](url)` |
+| Image | `![alt](src)` |
+| Hard line break | Two trailing spaces |
+| Horizontal rule | `---` |
+
+### Blocks
+
+| Element | Syntax |
+|---|---|
+| Fenced code block | ` ```lang ` … ` ``` ` |
+| Unordered list | `- item` or `* item` |
+| Ordered list | `1. item` |
+| Task list | `- [ ] todo` / `- [x] done` |
+| Blockquote | `> text` (nestable) |
+| GFM table | Pipe-separated with separator row |
+
+### Azure DevOps Extensions
+
+| Element | Syntax |
+|---|---|
+| Admonitions | `> [!NOTE]` / `> [!TIP]` / `> [!WARNING]` / `> [!IMPORTANT]` / `> [!CAUTION]` |
+| Mermaid diagram | `::: mermaid` … `:::` or ` ```mermaid ` … ` ``` ` |
 
 ## Configuration
 
