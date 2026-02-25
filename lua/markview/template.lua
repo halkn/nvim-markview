@@ -99,6 +99,7 @@ ul, ol {
   margin-top: 0;
   margin-bottom: 16px;
   padding-left: 2em;
+  margin-left: 1em;
 }
 li { margin-bottom: 4px; }
 /* Task list */
