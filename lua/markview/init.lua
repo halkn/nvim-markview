@@ -91,6 +91,21 @@ function M.open(bufnr)
     callback = debounced_push,
   })
 
+  local debounced_scroll = util.debounce(function()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local total = vim.api.nvim_buf_line_count(bufnr)
+    srv.scroll_to(cursor[1], total)
+  end, 50)
+
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = debounced_scroll,
+  })
+
   vim.api.nvim_create_autocmd("BufDelete", {
     group = augroup,
     buffer = bufnr,
