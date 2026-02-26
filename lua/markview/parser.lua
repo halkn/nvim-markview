@@ -116,8 +116,7 @@ function M.render(markdown, base_dir)
   local in_code_block = false
   local code_lang = ""
   local code_lines = {}
-  local in_list = false
-  local list_ordered = false
+  local list_stack = {}  -- { ordered = bool, indent = number }
   local in_para = false
   local para_lines = {}
   local in_blockquote = false
@@ -147,14 +146,49 @@ function M.render(markdown, base_dir)
   end
 
   local function flush_list()
-    if in_list then
-      if list_ordered then
-        table.insert(html, "</ol>")
-      else
-        table.insert(html, "</ul>")
-      end
-      in_list = false
+    while #list_stack > 0 do
+      local top = table.remove(list_stack)
+      table.insert(html, top.ordered and "</ol>" or "</ul>")
     end
+  end
+
+  -- Ensure the list stack is at the given indent level and type,
+  -- opening or closing nested lists as needed.
+  local function ensure_list_level(ordered, indent)
+    if #list_stack == 0 then
+      table.insert(html, ordered and "<ol>" or "<ul>")
+      table.insert(list_stack, { ordered = ordered, indent = indent })
+      return
+    end
+    local top = list_stack[#list_stack]
+    if indent > top.indent then
+      -- Deeper indent: open a nested list
+      table.insert(html, ordered and "<ol>" or "<ul>")
+      table.insert(list_stack, { ordered = ordered, indent = indent })
+    elseif indent < top.indent then
+      -- Shallower: close lists until we reach this level
+      while #list_stack > 0 and list_stack[#list_stack].indent > indent do
+        local t = table.remove(list_stack)
+        table.insert(html, t.ordered and "</ol>" or "</ul>")
+      end
+      -- After popping, open a new list if needed
+      if #list_stack == 0 then
+        table.insert(html, ordered and "<ol>" or "<ul>")
+        table.insert(list_stack, { ordered = ordered, indent = indent })
+      elseif list_stack[#list_stack].ordered ~= ordered then
+        local t = table.remove(list_stack)
+        table.insert(html, t.ordered and "</ol>" or "</ul>")
+        table.insert(html, ordered and "<ol>" or "<ul>")
+        table.insert(list_stack, { ordered = ordered, indent = indent })
+      end
+    elseif top.ordered ~= ordered then
+      -- Same indent but different list type: switch
+      table.remove(list_stack)
+      table.insert(html, top.ordered and "</ol>" or "</ul>")
+      table.insert(html, ordered and "<ol>" or "<ul>")
+      table.insert(list_stack, { ordered = ordered, indent = indent })
+    end
+    -- else: same indent and same type -> just continue adding items
   end
 
   local function flush_blockquote()
@@ -307,17 +341,11 @@ function M.render(markdown, base_dir)
     end
 
     -- Unordered list
-    local ul_item = line:match("^%s*[-*+]%s+(.*)")
-    if ul_item then
+    local ul_indent = line:match("^(%s*)[-*+]%s")
+    if ul_indent then
+      local ul_item = line:match("^%s*[-*+]%s+(.*)")
       flush_para()
-      if in_list and list_ordered then
-        flush_list()
-      end
-      if not in_list then
-        table.insert(html, "<ul>")
-        in_list = true
-        list_ordered = false
-      end
+      ensure_list_level(false, #ul_indent)
       -- Task list items: - [x] / - [X] (checked), - [ ] (unchecked)
       local checked = ul_item:match("^%[[xX]%]%s*(.*)")
       local unchecked = ul_item:match("^%[ %]%s*(.*)")
@@ -330,25 +358,19 @@ function M.render(markdown, base_dir)
           '<li class="task-list-item"><input type="checkbox" disabled> ' ..
           apply_inline(escape_html(unchecked), base_dir) .. '</li>')
       else
-        table.insert(html, "<li>" .. apply_inline(escape_html(ul_item), base_dir) .. "</li>")
+        table.insert(html, "<li>" .. apply_inline(escape_html(ul_item or ""), base_dir) .. "</li>")
       end
       i = i + 1
       goto continue
     end
 
     -- Ordered list
-    local ol_item = line:match("^%s*%d+%.%s+(.*)")
-    if ol_item then
+    local ol_indent = line:match("^(%s*)%d+%.%s")
+    if ol_indent then
+      local ol_item = line:match("^%s*%d+%.%s+(.*)")
       flush_para()
-      if in_list and not list_ordered then
-        flush_list()
-      end
-      if not in_list then
-        table.insert(html, "<ol>")
-        in_list = true
-        list_ordered = true
-      end
-      table.insert(html, "<li>" .. apply_inline(escape_html(ol_item), base_dir) .. "</li>")
+      ensure_list_level(true, #ol_indent)
+      table.insert(html, "<li>" .. apply_inline(escape_html(ol_item or ""), base_dir) .. "</li>")
       i = i + 1
       goto continue
     end
