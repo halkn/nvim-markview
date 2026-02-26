@@ -253,6 +253,13 @@ local function build_js(theme)
   evtSource.onerror = function() {
     // Reconnect is handled automatically by EventSource
   };
+  evtSource.addEventListener('scroll', function(e) {
+    var ratio = parseFloat(e.data);
+    var maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    if (maxScroll > 0) {
+      window.scrollTo({ top: ratio * maxScroll, behavior: 'smooth' });
+    }
+  });
 
   window.addEventListener('load', afterRender);
 })();

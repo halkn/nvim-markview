@@ -41,7 +41,7 @@ end
 ---@param port number
 ---@param config table
 ---@param base_dir string|nil  Directory of the Markdown file (for serving relative images)
----@return { push: fun(markdown: string), stop: fun() }
+---@return { push: fun(markdown: string), scroll_to: fun(cursor_line: number, total_lines: number), stop: fun() }
 function M.start(bufnr, port, config, base_dir)
   local clients = {} -- SSE client handles
   local current_html = ""
@@ -226,6 +226,25 @@ function M.start(bufnr, port, config, base_dir)
     clients = alive
   end
 
+  local function scroll_to(cursor_line, total_lines)
+    local ratio = cursor_line / math.max(total_lines, 1)
+    local payload = "event: scroll\ndata: " .. string.format("%.6f", ratio) .. "\n\n"
+    local alive = {}
+    for _, c in ipairs(clients) do
+      if not c:is_closing() then
+        c:write(payload, function(write_err)
+          if write_err then
+            if not c:is_closing() then
+              c:close()
+            end
+          end
+        end)
+        table.insert(alive, c)
+      end
+    end
+    clients = alive
+  end
+
   local function stop()
     -- Close all SSE clients
     for _, c in ipairs(clients) do
@@ -239,7 +258,7 @@ function M.start(bufnr, port, config, base_dir)
     end
   end
 
-  return { push = push, stop = stop }
+  return { push = push, scroll_to = scroll_to, stop = stop }
 end
 
 return M
