@@ -101,6 +101,11 @@ ul, ol {
   padding-left: 2em;
   margin-left: 1em;
 }
+ul ul, ul ol, ol ul, ol ol {
+  margin-left: 0;
+  margin-bottom: 0;
+  margin-top: 4px;
+}
 li { margin-bottom: 4px; }
 /* Task list */
 li.task-list-item { list-style: none; margin-left: -1.5em; }
